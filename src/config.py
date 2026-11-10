@@ -1,19 +1,33 @@
-"""De configuratie inlezen. Geen paden of parameters hardcoded in de rest van de code."""
+"""Leest de config en geeft paden terug."""
 
 from pathlib import Path
 
 import yaml
 
-PROJECT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]
+STANDAARD = ROOT / "configs" / "default.yaml"
 
 
-def laad_config(pad: str | Path = PROJECT / "configs" / "default.yaml") -> dict:
-    """Lees de YAML-config en maak de paden absoluut, zodat het niet uitmaakt van waar je draait."""
-    cfg = yaml.safe_load(Path(pad).read_text(encoding="utf-8"))
-    cfg["data"]["pad"] = PROJECT / cfg["data"]["pad"]
-    cfg["model"]["pad"] = PROJECT / cfg["model"]["pad"]
+def maak_pad(pad):
+    """Relatieve paden uit de config zijn relatief aan de projectmap."""
+    pad = Path(pad)
+    return pad if pad.is_absolute() else ROOT / pad
+
+
+def laad_config(pad=None):
+    with open(pad or STANDAARD, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    controleer_config(cfg)
     return cfg
 
 
-def alle_features(cfg: dict) -> list[str]:
-    return cfg["features"]["numeriek"] + cfg["features"]["categorisch"]
+def controleer_config(cfg):
+    horizon = cfg["horizon_uren"]
+    lags = cfg["features"]["lags_uren"]
+    if min(lags) < horizon:
+        raise ValueError(
+            f"Kleinste lag ({min(lags)} u) is korter dan de horizon ({horizon} u): "
+            "het model zou de toekomst zien."
+        )
+    if cfg["features"]["baseline_lag_uren"] not in lags:
+        raise ValueError("baseline_lag_uren moet een van de lags_uren zijn.")
