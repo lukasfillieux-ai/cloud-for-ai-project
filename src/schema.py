@@ -1,30 +1,50 @@
-"""Hoe de data eruit hoort te zien, vastgelegd met Pandera.
-
-Twee schema's, want op het moment van voorspellen ken je het antwoord nog niet:
-
-- INVOER: wat een klant meebrengt, bij training én bij voorspellen
-- TRAINING: hetzelfde, plus de doelkolom
-
-Pas dit aan voor je eigen dataset. Vraag je per kolom af: welk type, welk bereik,
-welke waarden zijn toegelaten, mag ze leeg zijn?
-"""
+"""Hoe de data eruit hoort te zien (Pandera). Breekt luid bij kapotte data."""
 
 import pandera.pandas as pa
 
-INVOER = pa.DataFrameSchema(
+GEBOUWEN = pa.DataFrameSchema(
     {
-        "klant_id": pa.Column(str, unique=True),
-        "maanden_klant": pa.Column(int, pa.Check.in_range(0, 600)),
-        "contract": pa.Column(str, pa.Check.isin(["maand", "1 jaar", "2 jaar"])),
-        # In euro per maand. Een bedrag in cent valt hier meteen buiten.
-        "maandbedrag": pa.Column(float, pa.Check.in_range(0, 200)),
-        "data_gb": pa.Column(float, pa.Check.ge(0)),
-        "klantendienst_contacten": pa.Column(int, pa.Check.ge(0)),
-        "toestel_via_telko": pa.Column(int, pa.Check.isin([0, 1])),
+        "site_id": pa.Column(int, pa.Check.ge(0)),
+        "building_id": pa.Column(int, pa.Check.ge(0)),
+        "primary_use": pa.Column(str),
+        "square_feet": pa.Column(float, pa.Check.gt(0)),
+        "year_built": pa.Column(float, nullable=True),
+        "floor_count": pa.Column(float, nullable=True),
     },
-    # Een extra kolom is geen probleem, een ontbrekende wel.
-    strict=False,
-    name="Telko-klanten",
+    unique=["building_id"],
+    coerce=True,
 )
 
-TRAINING = INVOER.add_columns({"opgezegd": pa.Column(int, pa.Check.isin([0, 1]))})
+VERBRUIK = pa.DataFrameSchema(
+    {
+        "building_id": pa.Column(int, pa.Check.ge(0)),
+        "meter": pa.Column(int, pa.Check.isin([0, 1, 2, 3])),
+        "timestamp": pa.Column(pa.DateTime),
+        # een verbruik kan nooit negatief zijn
+        "meter_reading": pa.Column(float, pa.Check.ge(0)),
+    },
+    unique=["building_id", "meter", "timestamp"],
+    coerce=True,
+)
+
+WEER = pa.DataFrameSchema(
+    {
+        "site_id": pa.Column(int, pa.Check.ge(0)),
+        "timestamp": pa.Column(pa.DateTime),
+        "air_temperature": pa.Column(float, pa.Check.in_range(-60, 60), nullable=True),
+        "dew_temperature": pa.Column(float, pa.Check.in_range(-60, 60), nullable=True),
+        "wind_speed": pa.Column(float, pa.Check.ge(0), nullable=True),
+        "cloud_coverage": pa.Column(float, nullable=True),
+        "precip_depth_1_hr": pa.Column(float, nullable=True),
+    },
+    unique=["site_id", "timestamp"],
+    coerce=True,
+)
+
+VAKANTIES = pa.DataFrameSchema(
+    {
+        "site_id": pa.Column(int, pa.Check.ge(0)),
+        "datum": pa.Column(pa.DateTime),
+    },
+    coerce=True,
+)

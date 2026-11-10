@@ -1,42 +1,58 @@
-"""Een opgeslagen model laden en voorspellen voor nieuwe klanten.
+"""Model laden en een dag voorspellen. Draai met: python -m src.predict 2016-12-15
 
-python -m src.predict data/nieuwe_maand.csv
-python -m src.predict data/nieuwe_maand.csv --zonder-schema
+Gebruikt enkel verbruik van vóór het begin van die dag, plus het weer van die dag
+(in de dataset gemeten, in productie een weersvoorspelling).
 """
 
 import sys
-from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.pipeline import Pipeline
 
-from . import schema
-from .config import alle_features, laad_config
-from .data import laad_data
-
-
-def laad_model(pad: str | Path) -> Pipeline:
-    return joblib.load(pad)
+from src.config import ROOT, laad_config
+from src.data import laad_data, laad_gebouwen, laad_vakanties, laad_weer
+from src.features import alle_features, bouw_featuretabel
+from src.train import MODEL_PAD
 
 
-def voorspel(model: Pipeline, df: pd.DataFrame, cfg: dict) -> np.ndarray:
-    """De kans op opzeggen, één getal per klant."""
-    return model.predict_proba(df[alle_features(cfg)])[:, 1]
+def voorspel_dag(model, cfg, dag, tabel=None):
+    """Voorspelt per gebouw het verbruik (kWh) voor de 24 uur vanaf `dag` 00:00."""
+    doel = cfg["doel"]["kolom"]
+    start = pd.Timestamp(dag)
+    uren = pd.date_range(start, periods=cfg["horizon_uren"], freq="h")
+
+    if tabel is None:
+        tabel = laad_data(cfg)
+    historiek = tabel[tabel["timestamp"] < start]
+
+    # een leeg raster van gebouwen x uren van de doeldag, met het weer van die dag
+    gebouwen = laad_gebouwen(cfg)
+    gebouwen = gebouwen[gebouwen["building_id"].isin(historiek["building_id"].unique())]
+    raster = gebouwen.merge(pd.DataFrame({"timestamp": uren}), how="cross")
+    raster = raster.merge(laad_weer(cfg), on=["site_id", "timestamp"], how="left")
+    raster[doel] = np.nan
+
+    alles = pd.concat([historiek, raster], ignore_index=True)
+    features = bouw_featuretabel(alles, cfg, laad_vakanties(cfg))
+    dagrijen = features[features["timestamp"].isin(uren)].copy()
+    dagrijen["voorspelling_kwh"] = model.predict(dagrijen[alle_features(cfg)])
+    return dagrijen[["building_id", "timestamp", "voorspelling_kwh"]].reset_index(drop=True)
 
 
-def main(argv: list[str]) -> None:
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit("Gebruik: python -m src.predict JJJJ-MM-DD")
+    dag = sys.argv[1]
     cfg = laad_config()
-    pad = argv[0]
-    valideer = None if "--zonder-schema" in argv else schema.INVOER
+    model = joblib.load(MODEL_PAD)
+    resultaat = voorspel_dag(model, cfg, dag)
 
-    df = laad_data(pad, valideer_met=valideer)
-    kansen = voorspel(laad_model(cfg["model"]["pad"]), df, cfg)
-
-    print(f"{len(kansen)} klanten. Gemiddelde kans op opzeggen: {kansen.mean():.1%}")
-    print(f"Klanten boven 50%: {(kansen > 0.5).sum()}")
+    uitvoer = ROOT / "outputs" / f"voorspelling_{dag}.csv"
+    uitvoer.parent.mkdir(exist_ok=True)
+    resultaat.to_csv(uitvoer, index=False)
+    print(f"{len(resultaat)} voorspellingen weggeschreven naar {uitvoer}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()
