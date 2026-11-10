@@ -1,29 +1,43 @@
-# Alles wat je zou willen veranderen zonder code aan te raken, staat hier.
-# Paden zijn relatief ten opzichte van de projectmap.
+# Alle instellingen van het project. Geen code, geen paden of getallen elders.
+seed: 42
+horizon_uren: 24            # we voorspellen de komende 24 uur
 
 data:
-  pad: data/telko_klanten.csv
-  id_kolom: klant_id
+  verbruik_pad: data/train.csv              # ASHRAE: building_id, meter, timestamp, meter_reading
+  gebouwen_pad: data/building_metadata.csv
+  weer_pad: data/weather_train.csv
+  vakantie_pad: null                        # optioneel: csv met kolommen site_id,datum (YYYY-MM-DD)
+  primary_use: Education
+  site_ids: [4, 5]                          # null = alle sites
+  meter: 0                                  # 0 = elektriciteit
+  chunksize: 2000000
+  min_nulrun_uren: 48                       # reeks nullen van minstens zoveel uur = defecte meter
 
-doel: opgezegd
+doel:
+  kolom: meter_reading
+
+# Kosten in euro per kWh. Het kwantiel dat we voorspellen volgt hieruit:
+# q = kost_fn / (kost_fn + kost_fp) = 0,06 / 0,08 = 0,75
+kosten:
+  fp_per_kwh: 0.02    # te veel voorspeld: overschot met verlies terugverkopen
+  fn_per_kwh: 0.06    # te weinig voorspeld: onevenwichtstarief
 
 features:
-  numeriek:
-    - maanden_klant
-    - maandbedrag
-    - data_gb
-    - klantendienst_contacten
-    - toestel_via_telko
-  categorisch:
-    - contract
-  # email_bekend staat hier bewust niet: dat was het lek uit labo 4.
+  weer: [air_temperature, dew_temperature, wind_speed, cloud_coverage, precip_depth_1_hr]
+  gebouw: [square_feet, year_built, floor_count]
+  categorisch: [site_id, building_id]       # max 255 verschillende waarden per kolom
+  lags_uren: [24, 48, 168]                  # elke lag moet >= horizon_uren zijn
+  rolling_vensters_uren: [24, 168]
+  baseline_lag_uren: 168                    # naïeve baseline: zelfde uur vorige week
 
 split:
-  test_grootte: 0.2
-  seed: 42
+  testvanaf: "2016-10-01"                   # alles ervoor is train, alles erna is test
 
 model:
-  pad: models/model.joblib
-  max_iter: 1000
-  # Een model dat slechter doet dan dit, mag niet naar productie.
-  minimum_auc: 0.65
+  max_iter: 300
+  learning_rate: 0.1
+  max_leaf_nodes: 31
+  min_samples_leaf: 100
+
+kwaliteit:
+  max_kostratio: 1.0    # kosten van het model / kosten van de baseline. Moet <= 1 zijn
