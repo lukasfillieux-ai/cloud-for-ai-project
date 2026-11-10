@@ -1,7 +1,7 @@
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
-pandera>=0.20
+pandera>=0.24
 pyyaml>=6.0
 joblib>=1.3
 pytest>=8.0
