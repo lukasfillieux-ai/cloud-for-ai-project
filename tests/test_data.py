@@ -1,39 +1,41 @@
-"""Test de data, niet alleen de code. Garbage in, garbage out.
+"""Klopt de data? Breekt het schema op kapotte data?"""
 
-Elke test hieronder neemt de echte data, maakt er bewust iets aan stuk, en controleert dat
-het schema het tegenhoudt. Een schema dat alles doorlaat, is geen schema.
-"""
-
-import pandera.errors
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 
-from src import schema
+from src.data import laad_gebouwen, verwijder_nulruns
+from src.schema import VERBRUIK
 
 
-def test_echte_data_is_geldig(df):
-    schema.TRAINING.validate(df)
+def test_schema_accepteert_goede_data(tabel):
+    VERBRUIK.validate(tabel[["building_id", "meter", "timestamp", "meter_reading"]])
 
 
-def test_hernoemde_kolom_wordt_geweigerd(df):
-    kapot = df.rename(columns={"maandbedrag": "maandbedrag_eur"})
-    with pytest.raises(pandera.errors.SchemaError):
-        schema.TRAINING.validate(kapot)
+def test_schema_weigert_negatief_verbruik(tabel):
+    kapot = tabel[["building_id", "meter", "timestamp", "meter_reading"]].copy()
+    kapot.loc[0, "meter_reading"] = -5.0
+    with pytest.raises(pa.errors.SchemaError):
+        VERBRUIK.validate(kapot)
 
 
-def test_bedrag_in_cent_wordt_geweigerd(df):
-    # Het stilste soort fout: de kolom bestaat nog, het type klopt nog, de eenheid niet.
-    kapot = df.assign(maandbedrag=df["maandbedrag"] * 100)
-    with pytest.raises(pandera.errors.SchemaError):
-        schema.TRAINING.validate(kapot)
+def test_schema_weigert_dubbele_metingen(tabel):
+    kapot = tabel[["building_id", "meter", "timestamp", "meter_reading"]].head(10)
+    kapot = pd.concat([kapot, kapot.iloc[[0]]], ignore_index=True)
+    with pytest.raises(pa.errors.SchemaError):
+        VERBRUIK.validate(kapot)
 
 
-def test_onbekend_contract_wordt_geweigerd(df):
-    kapot = df.copy()
-    kapot.loc[0, "contract"] = "prepaid"
-    with pytest.raises(pandera.errors.SchemaError):
-        schema.TRAINING.validate(kapot)
+def test_enkel_scholen_van_de_gekozen_sites(cfg):
+    gebouwen = laad_gebouwen(cfg)
+    assert set(gebouwen["primary_use"]) == {"Education"}
+    assert 3 not in set(gebouwen["building_id"])  # het kantoor is eruit gefilterd
 
 
-def test_voorspellen_vraagt_geen_doelkolom(df, cfg):
-    # Bij het voorspellen ken je het antwoord nog niet. Het invoerschema mag het niet eisen.
-    schema.INVOER.validate(df.drop(columns=[cfg["doel"]]))
+def test_lange_nulruns_weg_korte_blijven(tabel, cfg):
+    gebouw0 = tabel[tabel["building_id"] == 0]
+    assert len(gebouw0) == 150 * 24 - 100  # de 100 uur nullen zijn weg
+    assert (gebouw0["meter_reading"] == 0).sum() == 5  # de 5 uur nullen blijven
+
+    # de functie zelf: min_uren bepaalt de grens
+    assert len(verwijder_nulruns(gebouw0, min_uren=3)) == len(gebouw0) - 5
