@@ -1,10 +1,12 @@
 """Geen lekken uit de toekomst: dit is de test die het meeste telt voor een voorspelmodel."""
 
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 
 from src.config import controleer_config
 from src.features import bouw_featuretabel
+from src.schema import featureschema
 
 
 def test_lag_24_is_het_verbruik_van_24_uur_eerder(features):
@@ -33,3 +35,21 @@ def test_lag_korter_dan_horizon_wordt_geweigerd(cfg):
     slecht = {**cfg, "features": {**cfg["features"], "lags_uren": [1, 24, 168]}}
     with pytest.raises(ValueError):
         controleer_config(slecht)
+
+
+def test_featureschema_accepteert_de_featuretabel(features, cfg):
+    featureschema(cfg).validate(features)
+
+
+def test_featureschema_weigert_onmogelijk_uur(features, cfg):
+    kapot = features.copy()
+    kapot.loc[0, "uur"] = 25
+    with pytest.raises(pa.errors.SchemaError):
+        featureschema(cfg).validate(kapot)
+
+
+def test_featureschema_weigert_negatieve_lag(features, cfg):
+    kapot = features.copy()
+    kapot.loc[0, "lag_24"] = -1.0
+    with pytest.raises(pa.errors.SchemaError):
+        featureschema(cfg).validate(kapot)

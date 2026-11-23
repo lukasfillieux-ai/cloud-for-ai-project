@@ -48,3 +48,22 @@ VAKANTIES = pa.DataFrameSchema(
     },
     coerce=True,
 )
+
+
+def featureschema(cfg):
+    """Schema van de tabel waarmee het model traint: kalender, lags en doel.
+    Faalt bij een onmogelijk uur, een negatief verbruik of een negatieve lag."""
+    f = cfg["features"]
+    kolommen = {
+        "uur": pa.Column(int, pa.Check.in_range(0, 23)),
+        "weekdag": pa.Column(int, pa.Check.in_range(0, 6)),
+        "maand": pa.Column(int, pa.Check.in_range(1, 12)),
+        "is_weekend": pa.Column(int, pa.Check.isin([0, 1])),
+        "is_vakantie": pa.Column(int, pa.Check.isin([0, 1])),
+        cfg["doel"]["kolom"]: pa.Column(float, pa.Check.ge(0), nullable=True),
+    }
+    for k in f["lags_uren"]:
+        kolommen[f"lag_{k}"] = pa.Column(float, pa.Check.ge(0), nullable=True)
+    for w in f["rolling_vensters_uren"]:
+        kolommen[f"rol_{w}"] = pa.Column(float, pa.Check.ge(0), nullable=True)
+    return pa.DataFrameSchema(kolommen, coerce=True)

@@ -105,3 +105,12 @@ def train_test(cfg, features):
 def model(cfg, train_test):
     train, _ = train_test
     return bouw_pijplijn(cfg).fit(train[alle_features(cfg)], train[cfg["doel"]["kolom"]])
+
+
+@pytest.fixture(scope="session")
+def mediaan_model(cfg, train_test):
+    train, _ = train_test
+    q = cfg["vergelijking"]["kwantiel"]
+    return bouw_pijplijn(cfg, kwantiel=q).fit(
+        train[alle_features(cfg)], train[cfg["doel"]["kolom"]]
+    )

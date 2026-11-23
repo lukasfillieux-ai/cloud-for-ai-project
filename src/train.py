@@ -22,20 +22,22 @@ from src.metrics import (
     pinball,
     rmsle,
 )
+from src.schema import featureschema
 
 MODEL_PAD = ROOT / "models" / "model.joblib"
 METRICS_PAD = ROOT / "models" / "metrics.json"
 
 
-def bouw_pijplijn(cfg):
+def bouw_pijplijn(cfg, kwantiel=None):
     """Alles wat iets leert uit de data zit hier in: de encoder en het model.
 
-    We voorspellen het kwantiel q = kost_fn / (kost_fn + kost_fp) in plaats van het gemiddelde.
+    Standaard voorspellen we het kwantiel q = kost_fn / (kost_fn + kost_fp) in plaats van het
+    gemiddelde. Met `kwantiel` kan je een ander kwantiel kiezen, voor het vergelijkingsmodel.
     We trainen op log1p(verbruik): een kwantiel verandert niet door een stijgende
     transformatie, en zo is de fout relatief, zoals RMSLE.
     """
     k, m = cfg["kosten"], cfg["model"]
-    q = optimaal_kwantiel(k["fp_per_kwh"], k["fn_per_kwh"])
+    q = optimaal_kwantiel(k["fp_per_kwh"], k["fn_per_kwh"]) if kwantiel is None else kwantiel
     cat = cfg["features"]["categorisch"]
     num = numerieke_features(cfg)
 
@@ -74,8 +76,9 @@ def splits(tabel, cfg):
     return tabel[tabel["timestamp"] < grens], tabel[tabel["timestamp"] >= grens]
 
 
-def evalueer(model, test, cfg):
-    """Model tegenover de naïeve baseline (zelfde uur vorige week), op dezelfde rijen."""
+def evalueer(model, test, cfg, mediaan=None):
+    """Model tegenover de naïeve baseline (zelfde uur vorige week), op dezelfde rijen.
+    Met `mediaan` komt het vergelijkingsmodel erbij."""
     doel = cfg["doel"]["kolom"]
     baseline_kolom = f"lag_{cfg['features']['baseline_lag_uren']}"
     kosten = cfg["kosten"]
@@ -83,10 +86,10 @@ def evalueer(model, test, cfg):
 
     t = test.dropna(subset=[baseline_kolom])
     y = t[doel].to_numpy()
-    voorspellingen = {
-        "model": model.predict(t[alle_features(cfg)]),
-        "baseline": t[baseline_kolom].to_numpy(),
-    }
+    voorspellingen = {"model": model.predict(t[alle_features(cfg)])}
+    if mediaan is not None:
+        voorspellingen["mediaan"] = mediaan.predict(t[alle_features(cfg)])
+    voorspellingen["baseline"] = t[baseline_kolom].to_numpy()
     resultaat = {}
     for naam, p in voorspellingen.items():
         resultaat[naam] = {
@@ -99,37 +102,51 @@ def evalueer(model, test, cfg):
                 t["timestamp"], y, p, kosten["fp_per_kwh"], kosten["fn_per_kwh"]
             ),
         }
-    resultaat["kostratio"] = (
-        resultaat["model"]["kost_per_maand_eur"] / resultaat["baseline"]["kost_per_maand_eur"]
-    )
+    basis = resultaat["baseline"]["kost_per_maand_eur"]
+    resultaat["kostratio"] = resultaat["model"]["kost_per_maand_eur"] / basis
+    if mediaan is not None:
+        resultaat["kostratio_mediaan"] = resultaat["mediaan"]["kost_per_maand_eur"] / basis
     return resultaat
 
 
-def toon(resultaat, q):
-    print(f"\nKwantiel van het model: {q:.2f}  (dekking hoort daar dichtbij te liggen)")
-    print(f"{'':10}{'RMSLE':>8}{'CV(RMSE)%':>11}{'NMBE%':>8}{'dekking':>9}{'€/maand':>12}")
-    for naam in ("model", "baseline"):
+def toon(resultaat, q, q_mediaan=None):
+    print(f"\n{'':18}{'RMSLE':>8}{'CV(RMSE)%':>11}{'NMBE%':>8}{'dekking':>9}{'€/maand':>12}")
+    namen = {
+        "model": f"boosting q={q:.2f}",
+        "mediaan": f"boosting q={q_mediaan:.2f}" if q_mediaan is not None else "",
+        "baseline": "baseline",
+    }
+    for naam in ("model", "mediaan", "baseline"):
+        if naam not in resultaat:
+            continue
         r = resultaat[naam]
         print(
-            f"{naam:10}{r['rmsle']:8.3f}{r['cv_rmse_pct']:11.1f}{r['nmbe_pct']:8.1f}"
+            f"{namen[naam]:18}{r['rmsle']:8.3f}{r['cv_rmse_pct']:11.1f}{r['nmbe_pct']:8.1f}"
             f"{r['dekking']:9.2f}{r['kost_per_maand_eur']:12,.0f}"
         )
-    print(f"Kostratio model/baseline: {resultaat['kostratio']:.2f}")
+    print(f"\nKostratio gekozen model/baseline: {resultaat['kostratio']:.2f}")
+    if "kostratio_mediaan" in resultaat:
+        print(f"Kostratio q={q_mediaan:.2f}/baseline:        {resultaat['kostratio_mediaan']:.2f}")
 
 
 def main():
     cfg = laad_config()
     tabel = laad_data(cfg)
     features = bouw_featuretabel(tabel, cfg, laad_vakanties(cfg))
+    featureschema(cfg).validate(features)  # faalt bij onmogelijke waarden in de modeltabel
     train, test = splits(features, cfg)
     print(f"Train: {len(train):,} rijen  |  Test: {len(test):,} rijen")
 
-    model = bouw_pijplijn(cfg)
-    model.fit(train[alle_features(cfg)], train[cfg["doel"]["kolom"]])
-
-    resultaat = evalueer(model, test, cfg)
+    kolommen, doel = alle_features(cfg), cfg["doel"]["kolom"]
     k = cfg["kosten"]
-    toon(resultaat, optimaal_kwantiel(k["fp_per_kwh"], k["fn_per_kwh"]))
+    q = optimaal_kwantiel(k["fp_per_kwh"], k["fn_per_kwh"])
+    q_mediaan = cfg["vergelijking"]["kwantiel"]
+
+    model = bouw_pijplijn(cfg).fit(train[kolommen], train[doel])
+    mediaan = bouw_pijplijn(cfg, kwantiel=q_mediaan).fit(train[kolommen], train[doel])
+
+    resultaat = evalueer(model, test, cfg, mediaan=mediaan)
+    toon(resultaat, q, q_mediaan)
 
     grens = cfg["kwaliteit"]["max_kostratio"]
     if resultaat["kostratio"] > grens:

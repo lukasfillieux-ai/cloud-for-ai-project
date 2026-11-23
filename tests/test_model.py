@@ -87,3 +87,24 @@ def test_model_laadt_in_een_vers_proces(model, tmp_path):
         text=True,
     )
     assert klaar.returncode == 0, klaar.stderr
+
+
+def test_hoger_kwantiel_geeft_hogere_voorspellingen(model, mediaan_model, train_test, cfg):
+    """q = 0,75 voorspelt gemiddeld hoger dan q = 0,5: dat is de bewuste buffer."""
+    _, test = train_test
+    kolommen = alle_features(cfg)
+    assert model.predict(test[kolommen]).mean() > mediaan_model.predict(test[kolommen]).mean()
+
+
+def test_dekking_van_beide_modellen_volgt_hun_kwantiel(model, mediaan_model, train_test, cfg):
+    _, test = train_test
+    resultaat = evalueer(model, test, cfg, mediaan=mediaan_model)
+    assert resultaat["model"]["dekking"] > resultaat["mediaan"]["dekking"]
+    assert abs(resultaat["mediaan"]["dekking"] - cfg["vergelijking"]["kwantiel"]) < 0.1
+
+
+def test_kostengedreven_kwantiel_is_goedkoper_dan_de_mediaan(model, mediaan_model, train_test, cfg):
+    """Een tekort is drie keer duurder: q = 0,75 moet minder kosten dan q = 0,5."""
+    _, test = train_test
+    resultaat = evalueer(model, test, cfg, mediaan=mediaan_model)
+    assert resultaat["kostratio"] < resultaat["kostratio_mediaan"]

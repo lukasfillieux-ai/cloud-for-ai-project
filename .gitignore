@@ -223,3 +223,7 @@ models/
 __pycache__/
 *.pyc
 .env
+
+data/*.csv
+models/
+outputs/

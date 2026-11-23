@@ -26,7 +26,7 @@ pip install -r requirements.txt
 
 pytest                          # draait op nagemaakte data, de echte bestanden zijn niet nodig
 ruff check . ; ruff format --check .
-python -m src.train             # traint, vergelijkt met de baseline, schrijft models/model.joblib
+python -m src.train             # traint 2 modellen, vergelijkt met de baseline, schrijft models/model.joblib
 python -m src.predict 2016-12-15   # voorspelt die dag, schrijft outputs/voorspelling_2016-12-15.csv
 ```
 
@@ -39,12 +39,12 @@ configs/default.yaml   paden, sites, features, kosten, de splitdatum. Geen code
 ruff.toml              regels voor opmaak en stijl
 src/
   config.py            leest de config, controleert dat geen lag korter is dan de horizon
-  schema.py            hoe de data eruit hoort te zien (Pandera)
+  schema.py            hoe de data eruit hoort te zien (Pandera): gebouwen, verbruik, weer en de modeltabel
   data.py              inlezen, valideren, defecte meters (lange nulreeksen) verwijderen
   features.py          kalender, lags en voortschrijdende gemiddelden, zonder lekken
   doel.py              log1p-omrekening van het doel
   metrics.py           RMSLE, CV(RMSE), NMBE, pinball, kost van onevenwicht
-  train.py             pijplijn bouwen, trainen, vergelijken met de baseline, wegschrijven
+  train.py             pijplijn bouwen, 2 modellen trainen, vergelijken met de baseline, wegschrijven
   predict.py           model laden, een dag voorspellen
 tests/
   conftest.py          nagemaakte ASHRAE-data
@@ -52,10 +52,11 @@ tests/
   test_features.py     ziet het model de toekomst niet?
   test_metrics.py      de metrieken op getallen die je met de hand narekent
   test_model.py        vorm, seed, dekking, richting, baseline, opslaan, een dag voorspellen
+.github/workflows/    laat GitHub bij elke push de tests draaien
 data/                  hier komen de Kaggle-bestanden (niet committen)
 notebooks/             verkenning
-models/                wordt aangemaakt door src.train
-outputs/               wordt aangemaakt door src.predict
+models/                wordt aangemaakt door src.train (niet committen)
+outputs/               wordt aangemaakt door src.predict (niet committen)
 ```
 
 ## Belangrijke keuzes
@@ -66,6 +67,11 @@ outputs/               wordt aangemaakt door src.predict
   gebruikt dus enkel verbruik dat op dat moment al gemeten was.
 - **Tijdsgebonden split.** Alles voor `split.testvanaf` is train, alles erna is test. Nooit
   willekeurig splitsen bij een tijdreeks.
+- **Twee modellen plus een baseline.** Het gekozen model voorspelt q = 0,75. Het vergelijkingsmodel
+  is dezelfde boosting op q = 0,5 (`vergelijking.kwantiel` in de config). Zo zie je wat de
+  kostengedreven drempel oplevert: q = 0,5 scoort mogelijk beter op RMSLE, maar kost meer.
+- **Schema's.** Pandera controleert de ruwe bestanden en de tabel waarmee het model traint. Een
+  negatief verbruik, een onmogelijke temperatuur of een uur van 25 laat het programma stoppen.
 - **Baseline.** Het model moet goedkoper zijn dan "zelfde uur vorige week" (`kostratio ≤ 1`),
   anders schrijft `src.train` het model niet weg.
 - **Weer.** De dataset bevat gemeten weer. In productie heb je een voorspelling, dus de

@@ -39,5 +39,8 @@ model:
   max_leaf_nodes: 31
   min_samples_leaf: 100
 
+vergelijking:
+  kwantiel: 0.5
+
 kwaliteit:
   max_kostratio: 1.0    # kosten van het model / kosten van de baseline. Moet <= 1 zijn

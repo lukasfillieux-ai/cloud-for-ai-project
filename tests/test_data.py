@@ -4,8 +4,8 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
-from src.data import laad_gebouwen, verwijder_nulruns
-from src.schema import VERBRUIK
+from src.data import laad_gebouwen, laad_weer, verwijder_nulruns
+from src.schema import GEBOUWEN, VERBRUIK, WEER
 
 
 def test_schema_accepteert_goede_data(tabel):
@@ -39,3 +39,23 @@ def test_lange_nulruns_weg_korte_blijven(tabel, cfg):
 
     # de functie zelf: min_uren bepaalt de grens
     assert len(verwijder_nulruns(gebouw0, min_uren=3)) == len(gebouw0) - 5
+
+
+def test_weerschema_weigert_onmogelijke_temperatuur(cfg):
+    kapot = laad_weer(cfg)
+    kapot.loc[0, "air_temperature"] = 500.0
+    with pytest.raises(pa.errors.SchemaError):
+        WEER.validate(kapot)
+
+
+def test_gebouwschema_weigert_negatieve_oppervlakte(cfg):
+    kapot = laad_gebouwen(cfg)
+    kapot.loc[0, "square_feet"] = -10.0
+    with pytest.raises(pa.errors.SchemaError):
+        GEBOUWEN.validate(kapot)
+
+
+def test_schema_weigert_ontbrekende_kolom(tabel):
+    kapot = tabel[["building_id", "meter", "timestamp"]]  # meter_reading ontbreekt
+    with pytest.raises(pa.errors.SchemaError):
+        VERBRUIK.validate(kapot)
